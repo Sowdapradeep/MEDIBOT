@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useState, useRef } from "react";
 import { analyzeSymptomImage } from "@/lib/api";
 import Link from "next/link";
@@ -259,3 +261,4 @@ export default function ImageUploadPage() {
     </div>
   );
 }
+

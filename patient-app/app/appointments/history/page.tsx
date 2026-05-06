@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useEffect, useState } from "react";
 import { getAppointments } from "@/lib/api";
 
@@ -77,3 +79,4 @@ export default function AppointmentHistoryPage() {
     </div>
   );
 }
+

@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useState, useRef } from "react";
 import { transcribeVoice, submitSymptoms } from "@/lib/api";
 
@@ -122,3 +124,4 @@ export default function VoiceInputPage() {
     </div>
   );
 }
+

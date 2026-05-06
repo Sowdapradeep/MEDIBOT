@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useState } from "react";
 import { submitSymptoms } from "@/lib/api";
 import { useRouter } from "next/navigation";
@@ -289,3 +291,4 @@ export default function TextInputPage() {
     </div>
   );
 }
+

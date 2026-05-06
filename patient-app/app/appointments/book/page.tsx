@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+export const dynamic = "force-dynamic";
+
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { getNearbyDoctors, bookAppointment } from "@/lib/api";
 import { addAppointmentToStore } from "@/lib/appointments-store";
@@ -21,6 +23,14 @@ interface Doctor {
 }
 
 export default function BookAppointmentPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><p>Loading...</p></div>}>
+      <BookAppointmentContent />
+    </Suspense>
+  );
+}
+
+function BookAppointmentContent() {
   const searchParams = useSearchParams();
   const specialty = searchParams.get("specialty") || "General Physician";
   const severity = searchParams.get("severity") || "LOW";

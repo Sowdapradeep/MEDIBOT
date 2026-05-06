@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useState, useRef, useEffect } from "react";
 import { submitFollowup, analyzeSymptomImage } from "@/lib/api";
 import Link from "next/link";
@@ -465,3 +467,4 @@ export default function HealthMonitorPage() {
     </div>
   );
 }
+

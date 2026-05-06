@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { getAppointmentsForDoctor, updateAppointmentStatus, SharedAppointment } from "@/lib/appointments-store";
@@ -131,3 +133,4 @@ export default function DoctorDashboard() {
     </div>
   );
 }
+

@@ -1,5 +1,7 @@
 "use client";
 
+export const dynamic = "force-dynamic";
+
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 
@@ -247,3 +249,4 @@ export default function QRSharePage() {
     </div>
   );
 }
+
