@@ -1,0 +1,22 @@
+version: 1
+applications:
+  - frontend:
+      phases:
+        preBuild:
+          commands:
+            - cd patient-app
+            - npm install
+        build:
+          commands:
+            - cd patient-app
+            - npm run build
+      artifacts:
+        baseDirectory: patient-app/.next
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - patient-app/node_modules/**/*
+          - patient-app/.next/cache/**/*
+      buildPath: /
+    appRoot: patient-app
