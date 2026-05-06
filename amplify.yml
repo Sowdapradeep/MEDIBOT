@@ -1,22 +1,53 @@
 version: 1
 applications:
-  - frontend:
+  - appRoot: patient-app
+    frontend:
       phases:
         preBuild:
           commands:
-            - cd patient-app
             - npm install
         build:
           commands:
-            - cd patient-app
             - npm run build
       artifacts:
-        baseDirectory: patient-app/.next
+        baseDirectory: .next
         files:
           - '**/*'
       cache:
         paths:
-          - patient-app/node_modules/**/*
-          - patient-app/.next/cache/**/*
-      buildPath: /
-    appRoot: patient-app
+          - node_modules/**/*
+          - .next/cache/**/*
+  - appRoot: doctor-app
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - npm install
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: .next
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
+          - .next/cache/**/*
+  - appRoot: admin-portal
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            - npm install
+        build:
+          commands:
+            - npm run build
+      artifacts:
+        baseDirectory: .next
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
+          - .next/cache/**/*
