@@ -1,0 +1,431 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "MediBot DynamoDB Tables - All 9 tables with on-demand billing"
+
+Resources:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Patients Table
+  # ─────────────────────────────────────────────────────────────────────────────
+  PatientsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: medibot-patients
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: patient_id
+          AttributeType: S
+        - AttributeName: phone
+          AttributeType: S
+      KeySchema:
+        - AttributeName: patient_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: phone-index
+          KeySchema:
+            - AttributeName: phone
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Episodes Table
+  # ─────────────────────────────────────────────────────────────────────────────
+  EpisodesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: medibot-episodes
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: episode_id
+          AttributeType: S
+        - AttributeName: patient_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: episode_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: patient_id-index
+          KeySchema:
+            - AttributeName: patient_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Appointments Table
+  # ─────────────────────────────────────────────────────────────────────────────
+  AppointmentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: medibot-appointments
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: appointment_id
+          AttributeType: S
+        - AttributeName: patient_id
+          AttributeType: S
+        - AttributeName: doctor_id
+          AttributeType: S
+        - AttributeName: date
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+        - AttributeName: episode_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: appointment_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: patient_id-index
+          KeySchema:
+            - AttributeName: patient_id
+              KeyType: HASH
+            - AttributeName: date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: doctor_id-index
+          KeySchema:
+            - AttributeName: doctor_id
+              KeyType: HASH
+            - AttributeName: date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: status-index
+          KeySchema:
+            - AttributeName: status
+              KeyType: HASH
+            - AttributeName: date
+              KeyType: RANGE
+          Projection:
+            ProjectionType: KEYS_ONLY
+        - IndexName: episode-index
+          KeySchema:
+            - AttributeName: episode_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Medicines Table
+  # ─────────────────────────────────────────────────────────────────────────────
+  MedicinesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: medibot-medicines
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: medicine_id
+          AttributeType: S
+        - AttributeName: patient_id
+          AttributeType: S
+        - AttributeName: episode_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: medicine_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: patient_id-index
+          KeySchema:
+            - AttributeName: patient_id
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: episode-index
+          KeySchema:
+            - AttributeName: episode_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Followups Table
+  # ─────────────────────────────────────────────────────────────────────────────
+  FollowupsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: medibot-followups
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: followup_id
+          AttributeType: S
+        - AttributeName: patient_id
+          AttributeType: S
+        - AttributeName: episode_id
+          AttributeType: S
+        - AttributeName: scheduled_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: followup_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: patient_id-index
+          KeySchema:
+            - AttributeName: patient_id
+              KeyType: HASH
+            - AttributeName: scheduled_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: episode-index
+          KeySchema:
+            - AttributeName: episode_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Doctors Table
+  # ─────────────────────────────────────────────────────────────────────────────
+  DoctorsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: medibot-doctors
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: doctor_id
+          AttributeType: S
+        - AttributeName: hospital_id
+          AttributeType: S
+        - AttributeName: specialization
+          AttributeType: S
+        - AttributeName: is_active
+          AttributeType: S
+      KeySchema:
+        - AttributeName: doctor_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: hospital_id-index
+          KeySchema:
+            - AttributeName: hospital_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: specialty-index
+          KeySchema:
+            - AttributeName: specialization
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: active-doctors-index
+          KeySchema:
+            - AttributeName: is_active
+              KeyType: HASH
+            - AttributeName: specialization
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Hospitals Table
+  # ─────────────────────────────────────────────────────────────────────────────
+  HospitalsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: medibot-hospitals
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: hospital_id
+          AttributeType: S
+        - AttributeName: city
+          AttributeType: S
+      KeySchema:
+        - AttributeName: hospital_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: city-index
+          KeySchema:
+            - AttributeName: city
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # QR Tokens Table
+  # ─────────────────────────────────────────────────────────────────────────────
+  QRTokensTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: medibot-qr-tokens
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: token
+          AttributeType: S
+        - AttributeName: patient_id
+          AttributeType: S
+        - AttributeName: episode_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: token
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: patient_id-index
+          KeySchema:
+            - AttributeName: patient_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: episode-index
+          KeySchema:
+            - AttributeName: episode_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Doctor Notes Table
+  # ─────────────────────────────────────────────────────────────────────────────
+  DoctorNotesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: medibot-doctor-notes
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: note_id
+          AttributeType: S
+        - AttributeName: doctor_id
+          AttributeType: S
+        - AttributeName: episode_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: note_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: doctor_id-index
+          KeySchema:
+            - AttributeName: doctor_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: episode-index
+          KeySchema:
+            - AttributeName: episode_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+
+Outputs:
+  PatientsTableArn:
+    Value: !GetAtt PatientsTable.Arn
+    Export:
+      Name: MediBot-PatientsTableArn
+  EpisodesTableArn:
+    Value: !GetAtt EpisodesTable.Arn
+    Export:
+      Name: MediBot-EpisodesTableArn
+  AppointmentsTableArn:
+    Value: !GetAtt AppointmentsTable.Arn
+    Export:
+      Name: MediBot-AppointmentsTableArn
+  MedicinesTableArn:
+    Value: !GetAtt MedicinesTable.Arn
+    Export:
+      Name: MediBot-MedicinesTableArn
+  FollowupsTableArn:
+    Value: !GetAtt FollowupsTable.Arn
+    Export:
+      Name: MediBot-FollowupsTableArn
+  DoctorsTableArn:
+    Value: !GetAtt DoctorsTable.Arn
+    Export:
+      Name: MediBot-DoctorsTableArn
+  HospitalsTableArn:
+    Value: !GetAtt HospitalsTable.Arn
+    Export:
+      Name: MediBot-HospitalsTableArn
+  QRTokensTableArn:
+    Value: !GetAtt QRTokensTable.Arn
+    Export:
+      Name: MediBot-QRTokensTableArn
+  DoctorNotesTableArn:
+    Value: !GetAtt DoctorNotesTable.Arn
+    Export:
+      Name: MediBot-DoctorNotesTableArn

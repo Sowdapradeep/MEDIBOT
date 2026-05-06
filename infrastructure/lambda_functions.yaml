@@ -1,0 +1,464 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "MediBot Lambda Functions - 9 AI agents on Graviton2 (arm64)"
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [production, staging, development]
+  S3CodeBucket:
+    Type: String
+    Description: S3 bucket containing Lambda deployment packages
+  S3CodePrefix:
+    Type: String
+    Default: lambda/
+    Description: S3 key prefix for Lambda code packages
+  BedrockModelId:
+    Type: String
+    Default: "anthropic.claude-3-5-sonnet-20241022-v2:0"
+  BedrockModelFast:
+    Type: String
+    Default: "anthropic.claude-3-haiku-20240307-v1:0"
+  SNSAlertsTopicArn:
+    Type: String
+    Description: ARN of the SNS alerts topic
+  SNSFollowupTopicArn:
+    Type: String
+    Description: ARN of the SNS followup topic
+  SNSEmergencyTopicArn:
+    Type: String
+    Description: ARN of the SNS emergency topic
+
+Resources:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # IAM Role for Lambda Functions
+  # ─────────────────────────────────────────────────────────────────────────────
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: medibot-lambda-execution-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: MediBotDynamoDBAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:BatchWriteItem
+                  - dynamodb:BatchGetItem
+                Resource:
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/medibot-*"
+                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/medibot-*/index/*"
+        - PolicyName: MediBotS3Access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource:
+                  - "arn:aws:s3:::medibot-prescriptions-prod/*"
+                  - "arn:aws:s3:::medibot-reports-prod/*"
+                  - "arn:aws:s3:::medibot-qr-artifacts-prod/*"
+                  - "arn:aws:s3:::medibot-doctor-credentials-prod/*"
+        - PolicyName: MediBotBedrockAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource: "*"
+        - PolicyName: MediBotTextractAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - textract:DetectDocumentText
+                  - textract:StartDocumentTextDetection
+                  - textract:GetDocumentTextDetection
+                Resource: "*"
+        - PolicyName: MediBotSNSAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource:
+                  - !Ref SNSAlertsTopicArn
+                  - !Ref SNSFollowupTopicArn
+                  - !Ref SNSEmergencyTopicArn
+        - PolicyName: MediBotTranscribePollyAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - transcribe:StartTranscriptionJob
+                  - transcribe:GetTranscriptionJob
+                  - polly:SynthesizeSpeech
+                Resource: "*"
+        - PolicyName: MediBotKMSAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:GenerateDataKey
+                Resource: "*"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Triage Agent Lambda
+  # High compute — Bedrock Sonnet calls, accuracy critical
+  # ─────────────────────────────────────────────────────────────────────────────
+  TriageAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medibot-triage-agent
+      Runtime: python3.12
+      Handler: agents/triage.handler
+      Code:
+        S3Bucket: !Ref S3CodeBucket
+        S3Key: !Sub "${S3CodePrefix}triage.zip"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 512
+      Timeout: 30
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          AWS_REGION_NAME: !Ref AWS::Region
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          DYNAMODB_TABLE_PATIENTS: medibot-patients
+          DYNAMODB_TABLE_EPISODES: medibot-episodes
+          DYNAMODB_TABLE_MEDICINES: medibot-medicines
+          SNS_EMERGENCY_TOPIC_ARN: !Ref SNSEmergencyTopicArn
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Agent
+          Value: triage
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Decision Agent Lambda
+  # High compute — Bedrock Sonnet, determines next steps
+  # ─────────────────────────────────────────────────────────────────────────────
+  DecisionAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medibot-decision-agent
+      Runtime: python3.12
+      Handler: agents/decision.handler
+      Code:
+        S3Bucket: !Ref S3CodeBucket
+        S3Key: !Sub "${S3CodePrefix}decision.zip"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 256
+      Timeout: 15
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          AWS_REGION_NAME: !Ref AWS::Region
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          DYNAMODB_TABLE_EPISODES: medibot-episodes
+          DYNAMODB_TABLE_PATIENTS: medibot-patients
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Agent
+          Value: decision
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Suggestion Agent Lambda
+  # Medium compute — Bedrock Haiku, speed + cost optimized
+  # ─────────────────────────────────────────────────────────────────────────────
+  SuggestionAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medibot-suggestion-agent
+      Runtime: python3.12
+      Handler: agents/suggestion.handler
+      Code:
+        S3Bucket: !Ref S3CodeBucket
+        S3Key: !Sub "${S3CodePrefix}suggestion.zip"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 256
+      Timeout: 20
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          AWS_REGION_NAME: !Ref AWS::Region
+          BEDROCK_MODEL_ID: !Ref BedrockModelFast
+          DYNAMODB_TABLE_EPISODES: medibot-episodes
+          DYNAMODB_TABLE_MEDICINES: medibot-medicines
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Agent
+          Value: suggestion
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Doctor Recommendation Agent Lambda
+  # Medium compute — Bedrock Haiku
+  # ─────────────────────────────────────────────────────────────────────────────
+  DoctorRecAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medibot-doctor-rec-agent
+      Runtime: python3.12
+      Handler: agents/doctor_recommendation.handler
+      Code:
+        S3Bucket: !Ref S3CodeBucket
+        S3Key: !Sub "${S3CodePrefix}doctor_rec.zip"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 256
+      Timeout: 20
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          AWS_REGION_NAME: !Ref AWS::Region
+          BEDROCK_MODEL_ID: !Ref BedrockModelFast
+          DYNAMODB_TABLE_DOCTORS: medibot-doctors
+          DYNAMODB_TABLE_HOSPITALS: medibot-hospitals
+          DYNAMODB_TABLE_APPOINTMENTS: medibot-appointments
+          DYNAMODB_TABLE_EPISODES: medibot-episodes
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Agent
+          Value: doctor-rec
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Booking Agent Lambda
+  # Low compute — simple CRUD operations
+  # ─────────────────────────────────────────────────────────────────────────────
+  BookingAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medibot-booking-agent
+      Runtime: python3.12
+      Handler: agents/appointment_booking.handler
+      Code:
+        S3Bucket: !Ref S3CodeBucket
+        S3Key: !Sub "${S3CodePrefix}booking.zip"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 128
+      Timeout: 15
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          AWS_REGION_NAME: !Ref AWS::Region
+          BEDROCK_MODEL_ID: !Ref BedrockModelFast
+          DYNAMODB_TABLE_APPOINTMENTS: medibot-appointments
+          DYNAMODB_TABLE_DOCTORS: medibot-doctors
+          DYNAMODB_TABLE_PATIENTS: medibot-patients
+          DYNAMODB_TABLE_EPISODES: medibot-episodes
+          SNS_ALERTS_TOPIC_ARN: !Ref SNSAlertsTopicArn
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Agent
+          Value: booking
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Health Record Agent Lambda
+  # Medium compute — data aggregation
+  # ─────────────────────────────────────────────────────────────────────────────
+  HealthRecordAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medibot-health-record-agent
+      Runtime: python3.12
+      Handler: agents/health_record.handler
+      Code:
+        S3Bucket: !Ref S3CodeBucket
+        S3Key: !Sub "${S3CodePrefix}health_record.zip"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 256
+      Timeout: 20
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          AWS_REGION_NAME: !Ref AWS::Region
+          BEDROCK_MODEL_ID: !Ref BedrockModelFast
+          DYNAMODB_TABLE_PATIENTS: medibot-patients
+          DYNAMODB_TABLE_EPISODES: medibot-episodes
+          DYNAMODB_TABLE_MEDICINES: medibot-medicines
+          DYNAMODB_TABLE_APPOINTMENTS: medibot-appointments
+          DYNAMODB_TABLE_DOCTOR_NOTES: medibot-doctor-notes
+          S3_BUCKET_PRESCRIPTIONS: medibot-prescriptions-prod
+          S3_BUCKET_REPORTS: medibot-reports-prod
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Agent
+          Value: health-record
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Prescription Parsing Agent Lambda
+  # High memory — Textract async processing for images
+  # ─────────────────────────────────────────────────────────────────────────────
+  PrescriptionAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medibot-prescription-agent
+      Runtime: python3.12
+      Handler: agents/prescription_parsing.handler
+      Code:
+        S3Bucket: !Ref S3CodeBucket
+        S3Key: !Sub "${S3CodePrefix}prescription.zip"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 1024
+      Timeout: 60
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          AWS_REGION_NAME: !Ref AWS::Region
+          BEDROCK_MODEL_ID: !Ref BedrockModelFast
+          DYNAMODB_TABLE_MEDICINES: medibot-medicines
+          DYNAMODB_TABLE_EPISODES: medibot-episodes
+          DYNAMODB_TABLE_PATIENTS: medibot-patients
+          S3_BUCKET_PRESCRIPTIONS: medibot-prescriptions-prod
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Agent
+          Value: prescription
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Follow-up Monitor Agent Lambda
+  # Medium compute — scheduled checks and notifications
+  # ─────────────────────────────────────────────────────────────────────────────
+  FollowupAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medibot-followup-agent
+      Runtime: python3.12
+      Handler: agents/followup_monitor.handler
+      Code:
+        S3Bucket: !Ref S3CodeBucket
+        S3Key: !Sub "${S3CodePrefix}followup.zip"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 256
+      Timeout: 30
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          AWS_REGION_NAME: !Ref AWS::Region
+          BEDROCK_MODEL_ID: !Ref BedrockModelFast
+          DYNAMODB_TABLE_FOLLOWUPS: medibot-followups
+          DYNAMODB_TABLE_EPISODES: medibot-episodes
+          DYNAMODB_TABLE_PATIENTS: medibot-patients
+          SNS_FOLLOWUP_TOPIC_ARN: !Ref SNSFollowupTopicArn
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Agent
+          Value: followup
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Emergency Alert Agent Lambda
+  # High compute — Bedrock Sonnet, accuracy critical for emergencies
+  # ─────────────────────────────────────────────────────────────────────────────
+  EmergencyAgentFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: medibot-emergency-agent
+      Runtime: python3.12
+      Handler: agents/emergency_alert.handler
+      Code:
+        S3Bucket: !Ref S3CodeBucket
+        S3Key: !Sub "${S3CodePrefix}emergency.zip"
+      Role: !GetAtt LambdaExecutionRole.Arn
+      MemorySize: 512
+      Timeout: 15
+      Architectures:
+        - arm64
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref Environment
+          AWS_REGION_NAME: !Ref AWS::Region
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          DYNAMODB_TABLE_PATIENTS: medibot-patients
+          DYNAMODB_TABLE_EPISODES: medibot-episodes
+          DYNAMODB_TABLE_HOSPITALS: medibot-hospitals
+          SNS_EMERGENCY_TOPIC_ARN: !Ref SNSEmergencyTopicArn
+          SNS_ALERTS_TOPIC_ARN: !Ref SNSAlertsTopicArn
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Agent
+          Value: emergency
+
+Outputs:
+  TriageAgentArn:
+    Value: !GetAtt TriageAgentFunction.Arn
+    Export:
+      Name: MediBot-TriageAgentArn
+  DecisionAgentArn:
+    Value: !GetAtt DecisionAgentFunction.Arn
+    Export:
+      Name: MediBot-DecisionAgentArn
+  SuggestionAgentArn:
+    Value: !GetAtt SuggestionAgentFunction.Arn
+    Export:
+      Name: MediBot-SuggestionAgentArn
+  DoctorRecAgentArn:
+    Value: !GetAtt DoctorRecAgentFunction.Arn
+    Export:
+      Name: MediBot-DoctorRecAgentArn
+  BookingAgentArn:
+    Value: !GetAtt BookingAgentFunction.Arn
+    Export:
+      Name: MediBot-BookingAgentArn
+  HealthRecordAgentArn:
+    Value: !GetAtt HealthRecordAgentFunction.Arn
+    Export:
+      Name: MediBot-HealthRecordAgentArn
+  PrescriptionAgentArn:
+    Value: !GetAtt PrescriptionAgentFunction.Arn
+    Export:
+      Name: MediBot-PrescriptionAgentArn
+  FollowupAgentArn:
+    Value: !GetAtt FollowupAgentFunction.Arn
+    Export:
+      Name: MediBot-FollowupAgentArn
+  EmergencyAgentArn:
+    Value: !GetAtt EmergencyAgentFunction.Arn
+    Export:
+      Name: MediBot-EmergencyAgentArn

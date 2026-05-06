@@ -1,0 +1,299 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "MediBot S3 Buckets - Encrypted storage for prescriptions, reports, QR artifacts, and doctor credentials"
+
+Parameters:
+  KMSKeyArn:
+    Type: String
+    Description: ARN of the KMS key for S3 encryption
+    Default: ""
+
+Conditions:
+  HasKMSKey: !Not [!Equals [!Ref KMSKeyArn, ""]]
+
+Resources:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # KMS Key for S3 Encryption (created if not provided)
+  # ─────────────────────────────────────────────────────────────────────────────
+  MediBotS3Key:
+    Type: AWS::KMS::Key
+    Condition: HasKMSKey
+    Properties:
+      Description: "KMS key for MediBot S3 bucket encryption"
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableRootAccountAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+      Tags:
+        - Key: Project
+          Value: MediBot
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Prescriptions Bucket
+  # Archive after 1 year to Glacier
+  # ─────────────────────────────────────────────────────────────────────────────
+  PrescriptionsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: medibot-prescriptions-prod
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !If
+                - HasKMSKey
+                - !Ref KMSKeyArn
+                - !Ref AWS::NoValue
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveAfterOneYear
+            Status: Enabled
+            Transitions:
+              - TransitionInDays: 365
+                StorageClass: GLACIER
+            NoncurrentVersionTransitions:
+              - TransitionInDays: 90
+                StorageClass: GLACIER
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+        - Key: DataClassification
+          Value: PHI
+
+  PrescriptionsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PrescriptionsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyUnencryptedUploads
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${PrescriptionsBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt PrescriptionsBucket.Arn
+              - !Sub "${PrescriptionsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Reports Bucket
+  # ─────────────────────────────────────────────────────────────────────────────
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: medibot-reports-prod
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !If
+                - HasKMSKey
+                - !Ref KMSKeyArn
+                - !Ref AWS::NoValue
+            BucketKeyEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+        - Key: DataClassification
+          Value: PHI
+
+  ReportsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ReportsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt ReportsBucket.Arn
+              - !Sub "${ReportsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # QR Artifacts Bucket
+  # Delete after 1 hour (TTL via lifecycle expiration)
+  # ─────────────────────────────────────────────────────────────────────────────
+  QRArtifactsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: medibot-qr-artifacts-prod
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !If
+                - HasKMSKey
+                - !Ref KMSKeyArn
+                - !Ref AWS::NoValue
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteAfterOneHour
+            Status: Enabled
+            ExpirationInDays: 1
+            # Note: S3 lifecycle minimum granularity is 1 day.
+            # For true 1-hour TTL, use presigned URLs with 1-hour expiry
+            # and this lifecycle as a cleanup safety net.
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+        - Key: DataClassification
+          Value: Ephemeral
+
+  QRArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref QRArtifactsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt QRArtifactsBucket.Arn
+              - !Sub "${QRArtifactsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Doctor Credentials Bucket
+  # ─────────────────────────────────────────────────────────────────────────────
+  DoctorCredentialsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: medibot-doctor-credentials-prod
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !If
+                - HasKMSKey
+                - !Ref KMSKeyArn
+                - !Ref AWS::NoValue
+            BucketKeyEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: MediBot
+        - Key: Environment
+          Value: production
+        - Key: DataClassification
+          Value: Sensitive
+
+  DoctorCredentialsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DoctorCredentialsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyUnencryptedUploads
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${DoctorCredentialsBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt DoctorCredentialsBucket.Arn
+              - !Sub "${DoctorCredentialsBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+Outputs:
+  PrescriptionsBucketArn:
+    Value: !GetAtt PrescriptionsBucket.Arn
+    Export:
+      Name: MediBot-PrescriptionsBucketArn
+  PrescriptionsBucketName:
+    Value: !Ref PrescriptionsBucket
+    Export:
+      Name: MediBot-PrescriptionsBucketName
+  ReportsBucketArn:
+    Value: !GetAtt ReportsBucket.Arn
+    Export:
+      Name: MediBot-ReportsBucketArn
+  ReportsBucketName:
+    Value: !Ref ReportsBucket
+    Export:
+      Name: MediBot-ReportsBucketName
+  QRArtifactsBucketArn:
+    Value: !GetAtt QRArtifactsBucket.Arn
+    Export:
+      Name: MediBot-QRArtifactsBucketArn
+  QRArtifactsBucketName:
+    Value: !Ref QRArtifactsBucket
+    Export:
+      Name: MediBot-QRArtifactsBucketName
+  DoctorCredentialsBucketArn:
+    Value: !GetAtt DoctorCredentialsBucket.Arn
+    Export:
+      Name: MediBot-DoctorCredentialsBucketArn
+  DoctorCredentialsBucketName:
+    Value: !Ref DoctorCredentialsBucket
+    Export:
+      Name: MediBot-DoctorCredentialsBucketName

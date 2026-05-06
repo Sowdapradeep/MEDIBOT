@@ -1,0 +1,373 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "MediBot Cognito User Pools - Patient (phone/OTP), Doctor (email/admin-created), Admin (email/admin-created)"
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [production, staging, development]
+  SMSSenderArn:
+    Type: String
+    Description: ARN of the SNS origination identity for SMS (optional)
+    Default: ""
+
+Conditions:
+  HasSMSSender: !Not [!Equals [!Ref SMSSenderArn, ""]]
+
+Resources:
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # PATIENT USER POOL
+  # Phone number sign-in with OTP verification
+  # ═══════════════════════════════════════════════════════════════════════════════
+  PatientUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: medibot-patients-pool
+      UsernameAttributes:
+        - phone_number
+      AutoVerifiedAttributes:
+        - phone_number
+      MfaConfiguration: "ON"
+      EnabledMfas:
+        - SMS_MFA
+      SmsConfiguration:
+        ExternalId: medibot-sms-external-id
+        SnsCallerArn: !GetAtt CognitoSMSRole.Arn
+        SnsRegion: !Ref AWS::Region
+      SmsVerificationMessage: "MediBot: Your verification code is {####}"
+      SmsAuthenticationMessage: "MediBot: Your login code is {####}"
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: false
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: false
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - Name: phone_number
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: patient_id
+          AttributeDataType: String
+          Mutable: false
+          Required: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_phone_number
+            Priority: 1
+      UserPoolTags:
+        Project: MediBot
+        Environment: !Ref Environment
+        PoolType: patient
+
+  PatientUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: medibot-patient-app
+      UserPoolId: !Ref PatientUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_CUSTOM_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      SupportedIdentityProviders:
+        - COGNITO
+
+  PatientUserPoolGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: patients
+      UserPoolId: !Ref PatientUserPool
+      Description: "All registered patients"
+      Precedence: 10
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # DOCTOR USER POOL
+  # Email sign-in, admin-created accounts
+  # ═══════════════════════════════════════════════════════════════════════════════
+  DoctorUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: medibot-doctors-pool
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      MfaConfiguration: OPTIONAL
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+        InviteMessageTemplate:
+          EmailMessage: |
+            Welcome to MediBot, Dr. {username}!
+            
+            Your account has been created by your hospital administrator.
+            Your temporary password is: {####}
+            
+            Please log in and change your password within 7 days.
+          EmailSubject: "MediBot - Your Doctor Account is Ready"
+          SMSMessage: "MediBot: Dr. {username}, your temp password is {####}"
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: doctor_id
+          AttributeDataType: String
+          Mutable: false
+          Required: false
+        - Name: hospital_id
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+        - Name: specialization
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      UserPoolTags:
+        Project: MediBot
+        Environment: !Ref Environment
+        PoolType: doctor
+
+  DoctorUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: medibot-doctor-app
+      UserPoolId: !Ref DoctorUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      AccessTokenValidity: 8
+      IdTokenValidity: 8
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      SupportedIdentityProviders:
+        - COGNITO
+
+  DoctorUserPoolGroupDoctors:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: doctors
+      UserPoolId: !Ref DoctorUserPool
+      Description: "Verified doctors"
+      Precedence: 10
+
+  DoctorUserPoolGroupPending:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: pending-verification
+      UserPoolId: !Ref DoctorUserPool
+      Description: "Doctors pending credential verification"
+      Precedence: 20
+
+  # ═══════════════════════════════════════════════════════════════════════════════
+  # ADMIN USER POOL
+  # Email sign-in, admin-created accounts (hospital administrators)
+  # ═══════════════════════════════════════════════════════════════════════════════
+  AdminUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: medibot-admins-pool
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      MfaConfiguration: "ON"
+      EnabledMfas:
+        - SOFTWARE_TOKEN_MFA
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+        InviteMessageTemplate:
+          EmailMessage: |
+            Welcome to MediBot Admin Portal!
+            
+            Your administrator account has been created.
+            Username: {username}
+            Temporary password: {####}
+            
+            You will be required to set up MFA on first login.
+            Please change your password within 7 days.
+          EmailSubject: "MediBot Admin - Account Created"
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 14
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 3
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: hospital_id
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+        - Name: admin_role
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      UserPoolTags:
+        Project: MediBot
+        Environment: !Ref Environment
+        PoolType: admin
+
+  AdminUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: medibot-admin-portal
+      UserPoolId: !Ref AdminUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      PreventUserExistenceErrors: ENABLED
+      AccessTokenValidity: 4
+      IdTokenValidity: 4
+      RefreshTokenValidity: 7
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+      SupportedIdentityProviders:
+        - COGNITO
+
+  AdminUserPoolGroupSuperAdmin:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: super-admins
+      UserPoolId: !Ref AdminUserPool
+      Description: "Platform super administrators"
+      Precedence: 1
+
+  AdminUserPoolGroupHospitalAdmin:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: hospital-admins
+      UserPoolId: !Ref AdminUserPool
+      Description: "Hospital-level administrators"
+      Precedence: 10
+
+  AdminUserPoolGroupSupport:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      GroupName: support
+      UserPoolId: !Ref AdminUserPool
+      Description: "Support staff with read-only access"
+      Precedence: 20
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # IAM Role for Cognito SMS
+  # ─────────────────────────────────────────────────────────────────────────────
+  CognitoSMSRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: medibot-cognito-sms-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cognito-idp.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: medibot-sms-external-id
+      Policies:
+        - PolicyName: CognitoSMSPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: "*"
+
+Outputs:
+  # Patient Pool
+  PatientUserPoolId:
+    Value: !Ref PatientUserPool
+    Export:
+      Name: MediBot-PatientUserPoolId
+  PatientUserPoolArn:
+    Value: !GetAtt PatientUserPool.Arn
+    Export:
+      Name: MediBot-PatientUserPoolArn
+  PatientUserPoolClientId:
+    Value: !Ref PatientUserPoolClient
+    Export:
+      Name: MediBot-PatientUserPoolClientId
+
+  # Doctor Pool
+  DoctorUserPoolId:
+    Value: !Ref DoctorUserPool
+    Export:
+      Name: MediBot-DoctorUserPoolId
+  DoctorUserPoolArn:
+    Value: !GetAtt DoctorUserPool.Arn
+    Export:
+      Name: MediBot-DoctorUserPoolArn
+  DoctorUserPoolClientId:
+    Value: !Ref DoctorUserPoolClient
+    Export:
+      Name: MediBot-DoctorUserPoolClientId
+
+  # Admin Pool
+  AdminUserPoolId:
+    Value: !Ref AdminUserPool
+    Export:
+      Name: MediBot-AdminUserPoolId
+  AdminUserPoolArn:
+    Value: !GetAtt AdminUserPool.Arn
+    Export:
+      Name: MediBot-AdminUserPoolArn
+  AdminUserPoolClientId:
+    Value: !Ref AdminUserPoolClient
+    Export:
+      Name: MediBot-AdminUserPoolClientId

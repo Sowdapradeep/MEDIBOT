@@ -1,0 +1,402 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "MediBot API Gateway - HTTP API with Lambda proxy integration and Cognito authorizer"
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues: [production, staging, development]
+  CognitoUserPoolArn:
+    Type: String
+    Description: ARN of the primary Cognito User Pool for authorization
+  PatientPoolClientId:
+    Type: String
+    Description: Client ID for the Patient Cognito User Pool
+  DoctorPoolClientId:
+    Type: String
+    Description: Client ID for the Doctor Cognito User Pool
+  AdminPoolClientId:
+    Type: String
+    Description: Client ID for the Admin Cognito User Pool
+  TriageAgentArn:
+    Type: String
+  DecisionAgentArn:
+    Type: String
+  SuggestionAgentArn:
+    Type: String
+  DoctorRecAgentArn:
+    Type: String
+  BookingAgentArn:
+    Type: String
+  HealthRecordAgentArn:
+    Type: String
+  PrescriptionAgentArn:
+    Type: String
+  FollowupAgentArn:
+    Type: String
+  EmergencyAgentArn:
+    Type: String
+
+Resources:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # HTTP API
+  # ─────────────────────────────────────────────────────────────────────────────
+  MediBotHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: medibot-api
+      Description: "MediBot HTTP API - AI-powered healthcare assistant"
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - "https://patient.medibot.in"
+          - "https://doctor.medibot.in"
+          - "https://admin.medibot.in"
+          - "http://localhost:3000"
+          - "http://localhost:3001"
+          - "http://localhost:3002"
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+          - X-Amz-Date
+          - X-Api-Key
+        ExposeHeaders:
+          - X-Request-Id
+        MaxAge: 86400
+        AllowCredentials: true
+      Tags:
+        Project: MediBot
+        Environment: !Ref Environment
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Cognito JWT Authorizer
+  # ─────────────────────────────────────────────────────────────────────────────
+  CognitoAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      AuthorizerType: JWT
+      Name: medibot-cognito-authorizer
+      IdentitySource: "$request.header.Authorization"
+      JwtConfiguration:
+        Audience:
+          - !Ref PatientPoolClientId
+          - !Ref DoctorPoolClientId
+          - !Ref AdminPoolClientId
+        Issuer: !Sub "https://cognito-idp.${AWS::Region}.amazonaws.com/${CognitoUserPoolArn}"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Stage
+  # ─────────────────────────────────────────────────────────────────────────────
+  ApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      StageName: "$default"
+      AutoDeploy: true
+      AccessLogSettings:
+        DestinationArn: !GetAtt ApiAccessLogGroup.Arn
+        Format: >-
+          {"requestId":"$context.requestId","ip":"$context.identity.sourceIp",
+          "requestTime":"$context.requestTime","httpMethod":"$context.httpMethod",
+          "routeKey":"$context.routeKey","status":"$context.status",
+          "protocol":"$context.protocol","responseLength":"$context.responseLength",
+          "integrationError":"$context.integrationErrorMessage"}
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
+
+  ApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/apigateway/medibot-api
+      RetentionInDays: 30
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Lambda Integrations
+  # ─────────────────────────────────────────────────────────────────────────────
+  TriageIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Ref TriageAgentArn
+      PayloadFormatVersion: "2.0"
+
+  DecisionIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Ref DecisionAgentArn
+      PayloadFormatVersion: "2.0"
+
+  SuggestionIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Ref SuggestionAgentArn
+      PayloadFormatVersion: "2.0"
+
+  DoctorRecIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Ref DoctorRecAgentArn
+      PayloadFormatVersion: "2.0"
+
+  BookingIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Ref BookingAgentArn
+      PayloadFormatVersion: "2.0"
+
+  HealthRecordIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Ref HealthRecordAgentArn
+      PayloadFormatVersion: "2.0"
+
+  PrescriptionIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Ref PrescriptionAgentArn
+      PayloadFormatVersion: "2.0"
+
+  FollowupIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Ref FollowupAgentArn
+      PayloadFormatVersion: "2.0"
+
+  EmergencyIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Ref EmergencyAgentArn
+      PayloadFormatVersion: "2.0"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Routes - Patient Endpoints
+  # ─────────────────────────────────────────────────────────────────────────────
+  TriageRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "POST /api/v1/episodes/triage"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${TriageIntegration}"
+
+  DecisionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "POST /api/v1/episodes/{episodeId}/decision"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${DecisionIntegration}"
+
+  SuggestionRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "GET /api/v1/episodes/{episodeId}/suggestions"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${SuggestionIntegration}"
+
+  DoctorRecRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "GET /api/v1/episodes/{episodeId}/doctor-recommendations"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${DoctorRecIntegration}"
+
+  BookAppointmentRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "POST /api/v1/appointments"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${BookingIntegration}"
+
+  GetAppointmentsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "GET /api/v1/appointments"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${BookingIntegration}"
+
+  CancelAppointmentRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "PUT /api/v1/appointments/{appointmentId}/cancel"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${BookingIntegration}"
+
+  HealthRecordRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "GET /api/v1/patients/{patientId}/health-record"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${HealthRecordIntegration}"
+
+  PrescriptionUploadRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "POST /api/v1/prescriptions/parse"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${PrescriptionIntegration}"
+
+  FollowupRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "GET /api/v1/patients/{patientId}/followups"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${FollowupIntegration}"
+
+  EmergencyRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "POST /api/v1/emergency/alert"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${EmergencyIntegration}"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Routes - Doctor Endpoints
+  # ─────────────────────────────────────────────────────────────────────────────
+  DoctorPatientRecordRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "GET /api/v1/doctor/patients/episodes/{episodeId}"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${HealthRecordIntegration}"
+
+  DoctorAppointmentsRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref MediBotHttpApi
+      RouteKey: "GET /api/v1/doctor/appointments"
+      AuthorizationType: JWT
+      AuthorizerId: !Ref CognitoAuthorizer
+      Target: !Sub "integrations/${BookingIntegration}"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Lambda Permissions (allow API Gateway to invoke)
+  # ─────────────────────────────────────────────────────────────────────────────
+  TriageInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref TriageAgentArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MediBotHttpApi}/*"
+
+  DecisionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DecisionAgentArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MediBotHttpApi}/*"
+
+  SuggestionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref SuggestionAgentArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MediBotHttpApi}/*"
+
+  DoctorRecInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DoctorRecAgentArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MediBotHttpApi}/*"
+
+  BookingInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref BookingAgentArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MediBotHttpApi}/*"
+
+  HealthRecordInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref HealthRecordAgentArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MediBotHttpApi}/*"
+
+  PrescriptionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PrescriptionAgentArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MediBotHttpApi}/*"
+
+  FollowupInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref FollowupAgentArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MediBotHttpApi}/*"
+
+  EmergencyInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref EmergencyAgentArn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${MediBotHttpApi}/*"
+
+Outputs:
+  ApiEndpoint:
+    Value: !GetAtt MediBotHttpApi.ApiEndpoint
+    Export:
+      Name: MediBot-ApiEndpoint
+  ApiId:
+    Value: !Ref MediBotHttpApi
+    Export:
+      Name: MediBot-ApiId
