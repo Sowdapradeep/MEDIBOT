@@ -2,7 +2,11 @@
 
 > An intelligent, multi-portal healthcare system connecting patients, doctors, and administrators through an AI-powered medical assistant — built on a modern TypeScript + Python stack and deployed on AWS.
 
+
 ---
+app link : https://main.dvf1od7d746qz.amplifyapp.com
+
+
 
 ## 📋 Table of Contents
 
